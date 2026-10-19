@@ -1,0 +1,551 @@
+--- a/build.gradle.kts+++ b/build.gradle.kts@@ -1,69 +1,76 @@ import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
++import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+ 
+ plugins {
+     kotlin("jvm") version "2.3.0"
+     id("com.gradleup.shadow") version "9.2.2"
+-    id("java")
+-    `java-library`
++    java
+ }
+ 
+ group = "com.github.mrjimin.nexoscreens"
+-version = "1.0.0"
++version = providers.gradleProperty("project_version").getOrElse("2.0.1-26.2")
+ 
+ repositories {
+     mavenCentral()
+-    maven("https://repo.papermc.io/repository/maven-public/") // Paper
+-    maven("https://repo.nexomc.com/releases") // Nexo
+-    maven("https://repo.dmulloy2.net/repository/public/") // ProtocolLib
+-    maven("https://repo.extendedclip.com/releases/") // PlaceholderAPI
++    maven("https://repo.papermc.io/repository/maven-public/")
++    maven("https://repo.nexomc.com/releases")
++    maven("https://repo.extendedclip.com/releases/")
+ }
+ 
+ dependencies {
+-    compileOnly("io.papermc.paper:paper-api:${rootProject.properties["paper_version"]}-R0.1-SNAPSHOT")
+-    compileOnly("com.nexomc:nexo:${rootProject.properties["nexo_version"]}") { exclude("*") }
++    // Paper 26.2 uses the new 26.2.build.* version scheme and requires a JDK 25 toolchain.
++    compileOnly("io.papermc.paper:paper-api:${providers.gradleProperty("paper_version").get()}")
++    compileOnly("com.nexomc:nexo:${providers.gradleProperty("nexo_version").get()}") {
++        isTransitive = false
++    }
++    compileOnly("net.dmulloy2:ProtocolLib:${providers.gradleProperty("protocollib_version").get()}")
++    compileOnly("me.clip:placeholderapi:${providers.gradleProperty("placeholderapi_version").get()}")
+ 
+-<<<<<<< HEAD
+-    compileOnly("com.comphenix.protocol","ProtocolLib","5.3.0") // ProtocolLib
+-=======
+-    compileOnly("net.dmulloy2:ProtocolLib:5.4.0")
+->>>>>>> 027534e (fixed an issue with command execution; updated the protocolLib dependency)
+-    compileOnly("me.clip","placeholderapi","2.11.6") // PlaceholderAPI
+-
+-    implementation("org.bstats","bstats-bukkit","3.0.2") // bStats
++    // Keep the plugin self-contained instead of downloading Kotlin at server startup.
++    implementation(kotlin("stdlib"))
++    implementation("org.bstats:bstats-bukkit:3.0.2")
+ }
+ 
+ kotlin {
+-    jvmToolchain(21)
++    jvmToolchain(25)
++    compilerOptions {
++        // Paper/Leaf 26.2 runs on Java 25, but Java 21 bytecode keeps the plugin less restrictive.
++        jvmTarget.set(JvmTarget.JVM_21)
++    }
+ }
+ 
+ java {
+-    sourceCompatibility = JavaVersion.VERSION_21
+-    targetCompatibility = JavaVersion.VERSION_21
++    toolchain.languageVersion.set(JavaLanguageVersion.of(25))
++}
++
++tasks.withType<JavaCompile>().configureEach {
++    options.encoding = "UTF-8"
++    options.release.set(21)
+ }
+ 
+ val shadowJarPlugin = tasks.register<ShadowJar>("shadowJarPlugin") {
+-    archiveFileName.set("NexoScreen-${project.version}.jar")
+-
++    archiveFileName.set("NexoScreens-${project.version}.jar")
+     destinationDirectory.set(file("${project.rootDir}/target"))
+ 
+     from(sourceSets.main.get().output)
+     configurations = listOf(project.configurations.runtimeClasspath.get())
+ 
++    // Prevent collisions with another plugin using bStats.
++    relocate("org.bstats", "com.github.mrjimin.nexoscreens.libs.bstats")
+ }
+ 
+ tasks.named("build") {
+     dependsOn(shadowJarPlugin)
+ }
+ 
+-tasks.compileJava {
+-    options.encoding = "UTF-8"
+-    options.release.set(21)
+-}
+-
+ tasks.processResources {
+     val props = mapOf("version" to version)
+     inputs.properties(props)
+     filteringCharset = "UTF-8"
++
++    // This project is a Paper/Leaf plugin. The old plugin.yml in the repository is stale.
++    exclude("plugin.yml")
++
+     filesMatching("paper-plugin.yml") {
+         expand(props)
+     }
+--- a/gradle.properties+++ b/gradle.properties@@ -1,8 +1,10 @@ kotlin.code.style=official
+ 
+ # Project settings
+-project_version=2.0.0
++project_version=2.0.1-26.2
+ 
+ # Dependency settings
+-paper_version=1.21.10
+-nexo_version=1.17.0+paper_version=26.2.build.+
++nexo_version=1.25.0
++protocollib_version=5.4.0
++placeholderapi_version=2.12.3
+--- a/gradle/wrapper/gradle-wrapper.properties+++ b/gradle/wrapper/gradle-wrapper.properties@@ -1,6 +1,5 @@-#Sun Mar 09 06:57:35 KST 2025
+ distributionBase=GRADLE_USER_HOME
+ distributionPath=wrapper/dists
+-distributionUrl=https\://services.gradle.org/distributions/gradle-9.0.0-bin.zip
++distributionUrl=https\://services.gradle.org/distributions/gradle-9.1.0-bin.zip
+ zipStoreBase=GRADLE_USER_HOME
+ zipStorePath=wrapper/dists
+--- a/settings.gradle.kts+++ b/settings.gradle.kts@@ -1,7 +1,8 @@ plugins {
+     id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
+ }
++
+ rootProject.name = "NexoScreens"
+ 
+-include("api")
+-include("nms:v1_21_8")+// The old api and nms:v1_21_8 modules contain no runtime code used by NexoScreens.
++// Keeping them in the build forces obsolete 1.21.8/1.21.x Paper dependencies to resolve.
+--- a/src/main/java/com/github/mrjimin/nexoscreens/NexoScreensLoader.java+++ /dev/null@@ -1,22 +0,0 @@-package com.github.mrjimin.nexoscreens;
+-
+-import io.papermc.paper.plugin.loader.PluginClasspathBuilder;
+-import io.papermc.paper.plugin.loader.PluginLoader;
+-import io.papermc.paper.plugin.loader.library.impl.MavenLibraryResolver;
+-import org.eclipse.aether.artifact.DefaultArtifact;
+-import org.eclipse.aether.graph.Dependency;
+-import org.eclipse.aether.repository.RemoteRepository;
+-
+-public class NexoScreensLoader implements PluginLoader {
+-
+-    @Override
+-    public void classloader(PluginClasspathBuilder classpathBuilder) {
+-        MavenLibraryResolver resolver = new MavenLibraryResolver();
+-        resolver.addDependency(new Dependency(new DefaultArtifact("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.3.0"), null));
+-        resolver.addDependency(new Dependency(new DefaultArtifact("org.jetbrains.kotlin:kotlin-reflect:2.3.0"), null));
+-
+-        resolver.addRepository(new RemoteRepository.Builder("paper", "default", "https://repo.papermc.io/repository/maven-public/").build());
+-
+-        classpathBuilder.addLibrary(resolver);
+-    }
+-}--- a/src/main/kotlin/com/github/mrjimin/nexoscreens/NexoScreens.kt+++ b/src/main/kotlin/com/github/mrjimin/nexoscreens/NexoScreens.kt@@ -3,8 +3,9 @@ import com.github.mrjimin.nexoscreens.command.CommandHandler
+ import com.github.mrjimin.nexoscreens.listener.EventListener
+ import com.github.mrjimin.nexoscreens.manager.ScreenManager
+-import me.clip.placeholderapi.metrics.bukkit.Metrics
++import org.bstats.bukkit.Metrics
+ import org.bukkit.plugin.java.JavaPlugin
++import java.util.Locale
+ 
+ class NexoScreens : JavaPlugin() {
+ 
+@@ -26,14 +27,17 @@         eventListener = EventListener(screenManager)
+ 
+         server.pluginManager.registerEvents(eventListener, this)
+-        server.scheduler.runTaskTimer(this, screenManager::tickScreens, 0, 1)
++        server.scheduler.runTaskTimer(this, screenManager::tickScreens, 0L, 1L)
+ 
+-        server.commandMap.register("nexoscreens", commandHandler)
++        server.commandMap.register(name.lowercase(Locale.ROOT), commandHandler)
+ 
+         screenManager.reload()
++        logger.info("NexoScreens ${pluginMeta.version} enabled for Paper/Leaf 26.2.")
+     }
+ 
+     override fun onDisable() {
+-        screenManager.clear()
++        if (::screenManager.isInitialized) {
++            screenManager.clear()
++        }
+     }
+ }--- a/src/main/kotlin/com/github/mrjimin/nexoscreens/listener/EventListener.kt+++ b/src/main/kotlin/com/github/mrjimin/nexoscreens/listener/EventListener.kt@@ -14,16 +14,16 @@         val player = event.player
+         val uuid = player.uniqueId
+         val view = screenManager.getActiveScreen(uuid) ?: return
++
+         view.executeEndCommands(player)
+-        player.isInvulnerable = view.isInvulnerable
+         screenManager.removeActiveScreen(uuid)
+     }
+ 
+     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+     fun onMove(event: PlayerMoveEvent) {
+-        val uuid = event.player.uniqueId
+-        val view = screenManager.getActiveScreen(uuid) ?: return
++        val view = screenManager.getActiveScreen(event.player.uniqueId) ?: return
+         if (view.isOver() || view.movement) return
++
+         event.isCancelled = true
+     }
+ }--- a/src/main/kotlin/com/github/mrjimin/nexoscreens/manager/Screen.kt+++ b/src/main/kotlin/com/github/mrjimin/nexoscreens/manager/Screen.kt@@ -1,10 +1,10 @@ package com.github.mrjimin.nexoscreens.manager
+ 
+-import com.nexomc.nexo.NexoPlugin
+-import com.nexomc.nexo.glyphs.Glyph
+ import com.github.mrjimin.nexoscreens.util.CommandUtils
+ import com.github.mrjimin.nexoscreens.util.ProtocolLib
+ import com.github.mrjimin.nexoscreens.util.toMMComponent
++import com.nexomc.nexo.NexoPlugin
++import com.nexomc.nexo.glyphs.Glyph
+ import me.clip.placeholderapi.PlaceholderAPI
+ import net.kyori.adventure.text.Component
+ import net.kyori.adventure.text.format.TextColor
+@@ -14,7 +14,7 @@ import org.bukkit.configuration.ConfigurationSection
+ import org.bukkit.entity.Player
+ import java.time.Duration
+-import java.util.*
++import java.util.UUID
+ 
+ data class Screen(
+     val id: String,
+@@ -25,40 +25,72 @@ ) {
+     private var glyph: Glyph? = null
+     private val miniMessage = MiniMessage.miniMessage()
+-    private val hasPapi = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")
+ 
+-    fun show(players: Set<Player>, color: TextColor, text: Component, fadeInTicks: Long, stayTicks: Long, fadeOutTicks: Long, consumer: (UUID, ScreenView) -> Unit) {
++    fun show(
++        players: Set<Player>,
++        color: TextColor,
++        text: Component,
++        fadeInTicks: Long,
++        stayTicks: Long,
++        fadeOutTicks: Long,
++        consumer: (UUID, ScreenView) -> Unit
++    ) {
+         val fadeInMs = fadeInTicks * 50L
+         val stayMs = stayTicks * 50L
+         val fadeOutMs = fadeOutTicks * 50L
+         val totalMs = fadeInMs + stayMs + fadeOutMs
+-        val titleTimes = Title.Times.times(Duration.ofMillis(fadeInMs), Duration.ofMillis(stayMs), Duration.ofMillis(fadeOutMs))
++        val titleTimes = Title.Times.times(
++            Duration.ofMillis(fadeInMs),
++            Duration.ofMillis(stayMs),
++            Duration.ofMillis(fadeOutMs)
++        )
++        val hasPapi = Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")
+ 
+         players.forEach { player ->
+-            val finalText = if (hasPapi) (PlaceholderAPI.setPlaceholders(player, miniMessage.serialize(text))).toMMComponent() else text
++            val finalText = if (hasPapi) {
++                PlaceholderAPI.setPlaceholders(player, miniMessage.serialize(text)).toMMComponent()
++            } else {
++                text
++            }
+             val title = createTitle(color, finalText, titleTimes)
+ 
+-            val finalStartCommands = if (hasPapi) startCommands.map { PlaceholderAPI.setPlaceholders(player, it) } else startCommands
+-            val finalEndCommands = if (hasPapi) endCommands.map { PlaceholderAPI.setPlaceholders(player, it) } else endCommands
++            val finalStartCommands = if (hasPapi) {
++                startCommands.map { PlaceholderAPI.setPlaceholders(player, it) }
++            } else {
++                startCommands
++            }
++            val finalEndCommands = if (hasPapi) {
++                endCommands.map { PlaceholderAPI.setPlaceholders(player, it) }
++            } else {
++                endCommands
++            }
+ 
+             CommandUtils.runCommands(finalStartCommands)
+ 
+-            val oldInvulnerable = player.isInvulnerable
+-            if (invulnerable) player.isInvulnerable = true
++            val originalInvulnerable = player.isInvulnerable
++            if (invulnerable) {
++                player.isInvulnerable = true
++            }
+             ProtocolLib.hideHUD(player)
+ 
+-            consumer(player.uniqueId, ScreenView(oldInvulnerable, movement, finalEndCommands, System.currentTimeMillis() + totalMs))
++            consumer(
++                player.uniqueId,
++                ScreenView(
++                    originalInvulnerable,
++                    movement,
++                    finalEndCommands,
++                    System.currentTimeMillis() + totalMs
++                )
++            )
+             player.showTitle(title)
+         }
+     }
+ 
+     private fun createTitle(color: TextColor, text: Component, times: Title.Times): Title {
+         glyph = glyph ?: NexoPlugin.instance().fontManager().glyphFromID("nexoscreens_$id")
+-                ?: throw IllegalStateException("Glyph not found: nexoscreens_$id")
++            ?: throw IllegalStateException("Glyph not found: nexoscreens_$id")
+ 
+-        val glyphComponent = glyph!!.glyphComponent().color(color)
+-
+-        return Title.title(text, glyphComponent, times)
++        return Title.title(text, glyph!!.glyphComponent().color(color), times)
+     }
+ 
+     companion object {
+@@ -75,15 +107,16 @@ }
+ 
+ data class ScreenView(
+-    val isInvulnerable: Boolean,
++    val originalInvulnerable: Boolean,
+     val movement: Boolean,
+     val endCommands: List<String>,
+     val endTime: Long
+ ) {
+     fun isOver(): Boolean = System.currentTimeMillis() > endTime
++
+     fun executeEndCommands(player: Player) {
+         CommandUtils.runCommands(endCommands)
+-        if (isInvulnerable) player.isInvulnerable = false
++        player.isInvulnerable = originalInvulnerable
+         ProtocolLib.showHUD(player)
+     }
+ }--- a/src/main/kotlin/com/github/mrjimin/nexoscreens/manager/ScreenManager.kt+++ b/src/main/kotlin/com/github/mrjimin/nexoscreens/manager/ScreenManager.kt@@ -6,22 +6,33 @@ import org.bukkit.Bukkit
+ import org.bukkit.entity.Player
+ import org.bukkit.plugin.java.JavaPlugin
+-import java.util.*
++import java.util.UUID
+ 
+ class ScreenManager(private val plugin: JavaPlugin) {
+     private val activeScreens: MutableMap<UUID, ScreenView> = mutableMapOf()
+     private val screens: MutableMap<String, Screen> = mutableMapOf()
+     private val configHandler = ConfigHandler(plugin)
+ 
+-    fun show(players: Set<Player>, screen: Screen, color: TextColor, text: Component, fadeInTicks: Long, stayTicks: Long, fadeOutTicks: Long) {
++    fun show(
++        players: Set<Player>,
++        screen: Screen,
++        color: TextColor,
++        text: Component,
++        fadeInTicks: Long,
++        stayTicks: Long,
++        fadeOutTicks: Long
++    ) {
+         if (!Bukkit.isPrimaryThread()) {
+-            plugin.server.scheduler.runTask(plugin) { _ -> show(players, screen, color, text, fadeInTicks, stayTicks, fadeOutTicks) }
++            plugin.server.scheduler.runTask(plugin) { _ ->
++                show(players, screen, color, text, fadeInTicks, stayTicks, fadeOutTicks)
++            }
+             return
+         }
+ 
+-        val show = mutableSetOf(*players.toTypedArray())
+-        show.removeIf { activeScreens.containsKey(it.uniqueId) }
+-        screen.show(show, color, text, fadeInTicks, stayTicks, fadeOutTicks) { uuid, view -> activeScreens[uuid] = view }
++        val show = players.filterNot { activeScreens.containsKey(it.uniqueId) }.toSet()
++        screen.show(show, color, text, fadeInTicks, stayTicks, fadeOutTicks) { uuid, view ->
++            activeScreens[uuid] = view
++        }
+     }
+ 
+     fun reload() {
+@@ -37,28 +48,35 @@ 
+     fun clear() {
+         activeScreens.forEach { (uuid, view) ->
+-            val player = plugin.server.getPlayer(uuid) ?: return@forEach
+-            player.clearTitle()
+-            view.executeEndCommands(player)
+-            player.isInvulnerable = view.isInvulnerable
++            plugin.server.getPlayer(uuid)?.let { player ->
++                player.clearTitle()
++                view.executeEndCommands(player)
++            }
+         }
+         activeScreens.clear()
+         screens.clear()
+     }
+ 
+     fun tickScreens() {
+-        activeScreens.keys.removeIf { plugin.server.getPlayer(it) == null }
+-        activeScreens.filterValues(ScreenView::isOver).forEach { (uuid, view) ->
+-            val player = plugin.server.getPlayer(uuid) ?: return@forEach
++        val iterator = activeScreens.iterator()
++        while (iterator.hasNext()) {
++            val (uuid, view) = iterator.next()
++            val player = plugin.server.getPlayer(uuid)
++
++            if (player == null) {
++                iterator.remove()
++                continue
++            }
++
++            if (!view.isOver()) continue
++
+             view.executeEndCommands(player)
+-            player.isInvulnerable = view.isInvulnerable
+-            activeScreens.remove(uuid)
++            iterator.remove()
+         }
+     }
+ 
+     fun getScreen(id: String): Screen? = screens[id]
+     fun getActiveScreen(uuid: UUID): ScreenView? = activeScreens[uuid]
+     fun removeActiveScreen(uuid: UUID) = activeScreens.remove(uuid)
+-    fun getActiveScreens(): Map<UUID, ScreenView> = activeScreens.toMap()
+     fun getScreenKeys(): Set<String> = screens.keys
+ }--- a/src/main/kotlin/com/github/mrjimin/nexoscreens/util/ProtocolLib.kt+++ b/src/main/kotlin/com/github/mrjimin/nexoscreens/util/ProtocolLib.kt@@ -8,70 +8,71 @@ import org.bukkit.GameMode
+ import org.bukkit.entity.Player
+ import org.bukkit.scoreboard.Scoreboard
+-import java.util.*
++import java.util.UUID
++import java.util.logging.Level
+ 
+ object ProtocolLib {
+-    private var scoreboards: WeakHashMap<UUID, Scoreboard> = WeakHashMap()
+-    private var changeGamemode: Any? = null
++    // ClientboundGameEventPacket.CHANGE_GAME_MODE
++    private const val CHANGE_GAME_MODE = 3
+ 
+-    init {
+-        try {
+-            val fields = PacketType.Play.Server.GAME_STATE_CHANGE.packetClass.declaredFields
+-            if (fields[0].type != fields[1].type) changeGamemode = fields[4][null]
+-            else changeGamemode = fields[3][null]
+-        } catch (e: IllegalAccessException) {
+-            System.err.println("Failed to load ScreenEffects ProtocolLib")
+-            e.printStackTrace()
+-        }
+-    }
++    private val scoreboards: MutableMap<UUID, Scoreboard> = HashMap()
+ 
+-    private fun setGamemode(player: Player?, gamemode: Float) {
++    private fun setClientGamemode(player: Player, gameMode: GameMode) {
+         val packet = PacketContainer(PacketType.Play.Server.GAME_STATE_CHANGE)
+-        packet.modifier.write(0, changeGamemode)
+-        packet.float.write(0, gamemode)
++
++        // Do not inspect Mojang/NMS fields by index. ProtocolLib exposes this converter
++        // specifically so packet layout changes (including 26.x) do not break us.
++        packet.gameStateIDs.write(0, CHANGE_GAME_MODE)
++        packet.float.write(0, gamemodeToId(gameMode))
++
+         sendPacket(player, packet)
+     }
+ 
+     private fun refreshAbilities(player: Player) {
+-        player.allowFlight = player.allowFlight
++        if (player.isOnline) {
++            player.allowFlight = player.allowFlight
++        }
+     }
+ 
+     fun hideHUD(player: Player) {
+-        scoreboards[player.uniqueId] = player.scoreboard
++        scoreboards.putIfAbsent(player.uniqueId, player.scoreboard)
+         player.scoreboard = Bukkit.getScoreboardManager().newScoreboard
+ 
+         if (player.gameMode == GameMode.SPECTATOR) return
+ 
+-        setGamemode(player, gamemodeToId(GameMode.SPECTATOR))
++        setClientGamemode(player, GameMode.SPECTATOR)
+         refreshAbilities(player)
+     }
+ 
+     fun showHUD(player: Player) {
+-        val scoreboard = scoreboards[player.uniqueId]
+-        if (scoreboard != null) player.scoreboard = scoreboard
++        scoreboards.remove(player.uniqueId)?.let { player.scoreboard = it }
+ 
+         if (player.gameMode == GameMode.SPECTATOR) return
+ 
+-        setGamemode(player, gamemodeToId(player.gameMode))
++        setClientGamemode(player, player.gameMode)
+         Bukkit.getScheduler().runTaskLater(
+             NexoScreens.INSTANCE,
+-            Runnable { refreshAbilities(player) }, 5L
++            Runnable { refreshAbilities(player) },
++            5L
+         )
+     }
+ 
+-    private fun gamemodeToId(gameMode: GameMode): Float {
+-        return when (gameMode) {
+-            GameMode.SURVIVAL -> 0f
+-            GameMode.CREATIVE -> 1f
+-            GameMode.ADVENTURE -> 2f
+-            GameMode.SPECTATOR -> 3f
+-        }
++    private fun gamemodeToId(gameMode: GameMode): Float = when (gameMode) {
++        GameMode.SURVIVAL -> 0f
++        GameMode.CREATIVE -> 1f
++        GameMode.ADVENTURE -> 2f
++        GameMode.SPECTATOR -> 3f
+     }
+ 
+-    private fun sendPacket(player: Player?, packet: PacketContainer?) {
++    private fun sendPacket(player: Player, packet: PacketContainer) {
+         try {
+             ProtocolLibrary.getProtocolManager().sendServerPacket(player, packet)
+-        } catch (ignored: Throwable) {
++        } catch (throwable: Throwable) {
++            NexoScreens.INSTANCE.logger.log(
++                Level.WARNING,
++                "ProtocolLib could not send the HUD packet to ${player.name}.",
++                throwable
++            )
+         }
+     }
+ }--- a/src/main/resources/paper-plugin.yml+++ b/src/main/resources/paper-plugin.yml@@ -1,17 +1,21 @@ name: NexoScreens
+ version: '${version}'
+-api-version: 1.21
++api-version: '26.2'
+ author: mrjimin
+ 
+ main: com.github.mrjimin.nexoscreens.NexoScreens
+-loader: com.github.mrjimin.nexoscreens.NexoScreensLoader
+ 
+ dependencies:
+   server:
+     Nexo:
+       load: BEFORE
+       required: true
++      join-classpath: true
+     ProtocolLib:
+       load: BEFORE
+       required: true
+-      join-classpath: true+      join-classpath: true
++    PlaceholderAPI:
++      load: BEFORE
++      required: false
++      join-classpath: true
+--- a/src/main/resources/plugin.yml+++ /dev/null@@ -1,22 +0,0 @@-name: '${name}'
+-main: kr.jimin.screens.NexoScreens
+-version: '${version}'
+-api-version: 1.17
+-author: '${author}'
+-depend:
+-  - Nexo
+-  - ProtocolLib
+-softdepend:
+-  - PlaceholderAPI
+-
+-commands:
+-  nexoscreens:
+-    aliases:
+-      - nexos
+-      - ns
+-    description: NexoScreens effects command
+-    permission: nexoscreens.admin
+-
+-permissions:
+-  nexoscreens.command:
+-    default: op
