@@ -1,8 +1,7 @@
 name: NexoScreens
-version: '${version}'
+version: '2.0.1-26.2'
 api-version: '26.2'
 author: mrjimin
-
 main: com.github.mrjimin.nexoscreens.NexoScreens
 
 dependencies:
@@ -10,7 +9,6 @@ dependencies:
     Nexo:
       load: BEFORE
       required: true
-      join-classpath: true
     ProtocolLib:
       load: BEFORE
       required: true

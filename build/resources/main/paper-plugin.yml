@@ -1,0 +1,19 @@
+name: NexoScreens
+version: '2.0.1-26.2'
+api-version: '26.2'
+author: mrjimin
+main: com.github.mrjimin.nexoscreens.NexoScreens
+
+dependencies:
+  server:
+    Nexo:
+      load: BEFORE
+      required: true
+    ProtocolLib:
+      load: BEFORE
+      required: true
+      join-classpath: true
+    PlaceholderAPI:
+      load: BEFORE
+      required: false
+      join-classpath: true
