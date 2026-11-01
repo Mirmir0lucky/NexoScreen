@@ -81,7 +81,9 @@ public final class Screen {
             ));
 
             Component glyph = NexoHook.glyphComponent("nexoscreens_" + id, color);
-            player.showTitle(Title.title(finalText, glyph, times));
+            // Minecraft draws the subtitle on top of the title. The fullscreen glyph must be
+            // the bottom layer (title) so the user's text (subtitle) is rendered over it.
+            player.showTitle(Title.title(glyph, finalText, times));
         }
     }
 

@@ -90,7 +90,7 @@ data class Screen(
         glyph = glyph ?: NexoPlugin.instance().fontManager().glyphFromID("nexoscreens_$id")
             ?: throw IllegalStateException("Glyph not found: nexoscreens_$id")
 
-        return Title.title(text, glyph!!.glyphComponent().color(color), times)
+        return Title.title(glyph!!.glyphComponent().color(color), text, times)
     }
 
     companion object {
